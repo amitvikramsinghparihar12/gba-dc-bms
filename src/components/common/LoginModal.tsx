@@ -10,34 +10,27 @@ interface LoginModalProps {
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
-  const { users, switchUser, currentUser, addToast } = useApp();
+  const { users, switchUser, currentUser, addToast, signInWithCredentials } = useApp();
   const [selectedUserId, setSelectedUserId] = useState(currentUser.id);
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [activeTab, setActiveTab] = useState<'quick' | 'form'>('quick');
 
-  const handleQuickLogin = (id: string) => {
-    switchUser(id);
-    onClose();
+  const handleQuickLogin = async (id: string) => {
+    const ok = await switchUser(id);
+    if (ok) onClose();
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const matched = users.find((u) => u.email.toLowerCase() === emailInput.trim().toLowerCase());
-    if (matched) {
-      switchUser(matched.id);
+    const ok = await signInWithCredentials(emailInput, passwordInput);
+    if (ok) {
       addToast({
         type: 'success',
-        title: 'Authentication Successful',
-        message: `Authenticated as ${matched.name} (${matched.role})`,
+        title: 'Authentication successful',
+        message: emailInput.trim(),
       });
       onClose();
-    } else {
-      addToast({
-        type: 'error',
-        title: 'Authentication Failed',
-        message: 'Invalid credentials. Please select one of the seeded demo accounts.',
-      });
     }
   };
 
@@ -158,13 +151,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                   type="password"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="Demo password (any characters allowed)"
+                  placeholder="Demo@12345"
                   className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                Demo passwords: any string is accepted for any seeded email.
+                Seeded accounts use the password Demo@12345.
               </p>
             </div>
 

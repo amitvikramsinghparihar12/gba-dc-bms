@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
-import { api } from '../../server/api';
+import { api } from '../../lib/api';
 import { Bill, Vendor, DdoAllocation, BillDeduction, BillAttachment } from '../../types';
 import { calculateBillFinancials, formatINR, round2 } from '../../utils/calc';
 import { STANDARD_DEDUCTIONS } from '../../config/config';

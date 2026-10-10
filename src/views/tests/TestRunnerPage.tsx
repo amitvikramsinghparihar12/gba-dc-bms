@@ -51,7 +51,7 @@ export const TestRunnerPage: React.FC = () => {
             </h2>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Validates ACID concurrency, boundary checks, DDO isolation, statutory formats, and state transitions.
+            Checks calculation, budget, and workflow rules in the browser. Live bills and budgets stay in Supabase.
           </p>
         </div>
 

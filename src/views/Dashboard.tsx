@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { api } from '../server/api';
+import { api } from '../lib/api';
 import { Bill, DdoAllocation, BudgetGrant, DDO } from '../types';
 import { formatINR } from '../utils/calc';
 import { StatCard } from '../components/common/StatCard';

@@ -3,17 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+'use client';
+
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Shell } from './components/layout/Shell';
-import { Dashboard } from './pages/Dashboard';
-import { CreatorBills } from './pages/creator/CreatorBills';
-import { ReviewQueue } from './pages/review/ReviewQueue';
-import { RtgsManager } from './pages/rtgs/RtgsManager';
-import { DirectorGrants } from './pages/director/DirectorGrants';
-import { FinanceOfficerAllocations } from './pages/finance/FinanceOfficerAllocations';
-import { AdminDashboard } from './pages/admin/AdminDashboard';
-import { TestRunnerPage } from './pages/tests/TestRunnerPage';
+import { Dashboard } from './views/Dashboard';
+import { CreatorBills } from './views/creator/CreatorBills';
+import { ReviewQueue } from './views/review/ReviewQueue';
+import { RtgsManager } from './views/rtgs/RtgsManager';
+import { DirectorGrants } from './views/director/DirectorGrants';
+import { FinanceOfficerAllocations } from './views/finance/FinanceOfficerAllocations';
+import { AdminDashboard } from './views/admin/AdminDashboard';
+import { TestRunnerPage } from './views/tests/TestRunnerPage';
 
 function AppContent() {
   const { currentUser } = useApp();

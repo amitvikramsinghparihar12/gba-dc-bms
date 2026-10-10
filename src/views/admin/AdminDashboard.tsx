@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { api } from '../../server/api';
+import { api } from '../../lib/api';
 import {
   Department,
   DDO,

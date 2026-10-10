@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { api } from '../../server/api';
+import { api } from '../../lib/api';
 import { Bill, Vendor, DdoAllocation } from '../../types';
 import { formatINR } from '../../utils/calc';
 import { StatusBadge } from '../../components/common/StatusBadge';

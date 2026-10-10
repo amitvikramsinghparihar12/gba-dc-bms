@@ -50,6 +50,7 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
     users,
     switchUser,
     resetDemoData,
+    signOut,
     workflowConfig,
   } = useApp();
 
@@ -158,9 +159,9 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
                 return (
                   <button
                     key={r}
-                    onClick={() => {
-                      switchRole(r);
-                      onNavigate('dashboard');
+                    onClick={async () => {
+                      const ok = await switchRole(r);
+                      if (ok) onNavigate('dashboard');
                     }}
                     className={`px-2.5 py-1.5 rounded-lg font-medium transition-all text-xs whitespace-nowrap ${
                       isActive
@@ -188,10 +189,10 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
                   {ALL_ROLES.map((r) => (
                     <button
                       key={r}
-                      onClick={() => {
-                        switchRole(r);
+                      onClick={async () => {
+                        const ok = await switchRole(r);
                         setShowRoleMenu(false);
-                        onNavigate('dashboard');
+                        if (ok) onNavigate('dashboard');
                       }}
                       className={`w-full text-left px-3 py-2 text-xs font-medium ${
                         currentUser.role === r ? 'bg-blue-600 text-white font-bold' : 'text-slate-200 hover:bg-slate-800'
@@ -213,7 +214,10 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
                 <span className="text-[11px] text-blue-300">Creator:</span>
                 <select
                   value={currentUser.id}
-                  onChange={(e) => switchUser(e.target.value)}
+                  onChange={async (e) => {
+                    const ok = await switchUser(e.target.value);
+                    if (ok) onNavigate('dashboard');
+                  }}
                   className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
                 >
                   {sameRoleUsers.map((u) => (
@@ -327,11 +331,18 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
             </div>
             <div className="flex items-center justify-between text-[11px] mt-1.5">
               <span className="font-semibold text-slate-700">Storage:</span>
-              <span className="font-mono text-slate-600">Local ACID Store</span>
+              <span className="font-mono text-slate-600">Supabase</span>
             </div>
             <button
+              onClick={() => void signOut()}
+              className="mt-3 w-full py-1.5 px-2 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-semibold rounded border border-slate-200 flex items-center justify-center gap-1.5"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign out</span>
+            </button>
+            <button
               onClick={() => onNavigate('test-runner')}
-              className="mt-3 w-full py-1.5 px-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-[11px] font-semibold rounded flex items-center justify-center gap-1.5 transition-colors"
+              className="mt-2 w-full py-1.5 px-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-[11px] font-semibold rounded flex items-center justify-center gap-1.5 transition-colors"
             >
               <FlaskConical className="w-3.5 h-3.5 text-blue-700" />
               <span>Verify System Specs</span>
@@ -360,8 +371,8 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3 text-xs text-amber-800">
             <AlertOctagon className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             <p>
-              This action will reset all in-memory and local storage records. All customized bills,
-              new allocations, and audit logs will be reset to the original GBA Corporation baseline seed.
+              This restores departments, grants, DDO caps, bills, and the audit log in Supabase
+              to the original GBA Corporation baseline. Sign-in accounts stay in place.
             </p>
           </div>
 
@@ -374,7 +385,7 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
             </button>
             <button
               onClick={() => {
-                resetDemoData();
+                void resetDemoData();
                 setIsResetConfirmOpen(false);
                 onNavigate('dashboard');
               }}

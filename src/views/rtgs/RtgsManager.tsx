@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
-import { api } from '../../server/api';
+import { api } from '../../lib/api';
 import { Bill, Vendor, RtgsBatch, CorporateBankAccount } from '../../types';
 import { formatINR, numberToIndianWords } from '../../utils/calc';
 import { StatusBadge } from '../../components/common/StatusBadge';

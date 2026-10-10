@@ -190,25 +190,32 @@ WHERE ddo_id = :ddo_id
 ## 🚀 Getting Started & Local Setup
 
 ### Prerequisites
-- Node.js 18+ or 20+
+- Node.js 20+
 - npm 9+
+- A Supabase project
 
 ### Installation & Execution
 ```bash
-# 1. Clone the repository
-git clone https://github.com/your-org/gba-dc-bill-management-system.git
-cd gba-dc-bill-management-system
-
-# 2. Install dependencies
 npm install
+cp .env.example .env.local
+```
 
-# 3. Start development server
+Fill `.env.local` with `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`.
+
+In the Supabase SQL editor, run `supabase/schema.sql`. Then:
+
+```bash
+npm run seed
 npm run dev
-# App runs at http://localhost:3000
+```
 
-# 4. Execute unit tests
+The app runs at http://localhost:3000. Every seeded account signs in with password `Demo@12345`.
+
+```bash
 npm test
 ```
+
+The role switcher signs in as that officer through Supabase Auth. Bill submission reserves gross value with an atomic database update, rejection releases it in the same transaction, and RTGS advice generation commits the whole batch or none of it.
 
 ---
 
