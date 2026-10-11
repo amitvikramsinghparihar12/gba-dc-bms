@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Role } from '../../types';
 import {
   Building2,
   FileText,
@@ -17,13 +16,11 @@ import {
   HelpCircle,
   FlaskConical,
   LogOut,
-  ChevronDown,
   Building,
   Briefcase,
   AlertOctagon,
   Sparkles,
 } from 'lucide-react';
-import { LoginModal } from '../common/LoginModal';
 import { ToastContainer } from '../common/ToastContainer';
 import { Modal } from '../common/Modal';
 
@@ -33,33 +30,15 @@ interface ShellProps {
   children: React.ReactNode;
 }
 
-const ALL_ROLES: Role[] = [
-  'Super Admin',
-  'Director of Finance',
-  'Finance Officer',
-  'Creator',
-  'Verifier',
-  'Approver',
-  'RTGS Manager',
-];
-
 export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children }) => {
   const {
     currentUser,
-    switchRole,
-    users,
-    switchUser,
     resetDemoData,
     signOut,
     workflowConfig,
   } = useApp();
 
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
-  const [showRoleMenu, setShowRoleMenu] = useState(false);
-
-  // Operational users in same role for quick DDO switching
-  const sameRoleUsers = users.filter((u) => u.role === currentUser.role);
 
   // Dynamic Sidebar Navigation based on Role
   const getNavItems = () => {
@@ -79,12 +58,14 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
         return [
           { id: 'dashboard', label: 'Overview', icon: <PieChart className="w-4 h-4" /> },
           { id: 'director-grants', label: 'Budget Head Master', icon: <Layers className="w-4 h-4" /> },
+          { id: 'approver-queue', label: 'Sanction & Approval', icon: <FileCheck2 className="w-4 h-4" /> },
         ];
 
       case 'Finance Officer':
         return [
           { id: 'dashboard', label: 'Overview', icon: <PieChart className="w-4 h-4" /> },
-          { id: 'fo-allocations', label: 'DDO Budget Caps', icon: <Layers className="w-4 h-4" /> },
+          { id: 'fo-allocations', label: 'Budget Head Management', icon: <Layers className="w-4 h-4" /> },
+          { id: 'verifier-queue', label: 'Verification Queue', icon: <CheckCircle className="w-4 h-4" /> },
           { id: 'fo-requests', label: 'Budget Change Requests', icon: <FileCheck2 className="w-4 h-4" /> },
         ];
 
@@ -151,84 +132,7 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
             </div>
           </div>
 
-          {/* Center: Role Switcher Segmented / Dropdown */}
-          <div className="flex items-center gap-2 max-w-2xl overflow-x-auto py-1 scrollbar-none">
-            <div className="hidden xl:flex items-center bg-blue-950/70 p-1 rounded-xl border border-blue-800/80 text-xs">
-              {ALL_ROLES.map((r) => {
-                const isActive = currentUser.role === r;
-                return (
-                  <button
-                    key={r}
-                    onClick={async () => {
-                      const ok = await switchRole(r);
-                      if (ok) onNavigate('dashboard');
-                    }}
-                    className={`px-2.5 py-1.5 rounded-lg font-medium transition-all text-xs whitespace-nowrap ${
-                      isActive
-                        ? 'bg-blue-600 text-white font-bold shadow-xs'
-                        : 'text-blue-200 hover:text-white hover:bg-blue-800/50'
-                    }`}
-                  >
-                    {r}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Mobile / Compact Role Selector */}
-            <div className="xl:hidden relative">
-              <button
-                onClick={() => setShowRoleMenu(!showRoleMenu)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-900 border border-blue-700 text-xs font-semibold text-white"
-              >
-                <span>Role: {currentUser.role}</span>
-                <ChevronDown className="w-3.5 h-3.5" />
-              </button>
-              {showRoleMenu && (
-                <div className="absolute top-full left-0 mt-1 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-xl py-1 z-50">
-                  {ALL_ROLES.map((r) => (
-                    <button
-                      key={r}
-                      onClick={async () => {
-                        const ok = await switchRole(r);
-                        setShowRoleMenu(false);
-                        if (ok) onNavigate('dashboard');
-                      }}
-                      className={`w-full text-left px-3 py-2 text-xs font-medium ${
-                        currentUser.role === r ? 'bg-blue-600 text-white font-bold' : 'text-slate-200 hover:bg-slate-800'
-                      }`}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right: Operational Switcher, Test Runner, Reset, User Profile */}
           <div className="flex items-center gap-2.5 shrink-0">
-            {/* If Creator with multiple profiles, show DDO switch */}
-            {currentUser.role === 'Creator' && sameRoleUsers.length > 1 && (
-              <div className="hidden lg:flex items-center gap-1.5 bg-blue-950/80 px-2 py-1 rounded-lg border border-blue-800 text-xs">
-                <span className="text-[11px] text-blue-300">Creator:</span>
-                <select
-                  value={currentUser.id}
-                  onChange={async (e) => {
-                    const ok = await switchUser(e.target.value);
-                    if (ok) onNavigate('dashboard');
-                  }}
-                  className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer text-xs"
-                >
-                  {sameRoleUsers.map((u) => (
-                    <option key={u.id} value={u.id} className="bg-slate-900 text-white">
-                      {u.name} (DDO: {u.ddoIds.join(', ')})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
             {/* Test Runner Button */}
             <button
               onClick={() => onNavigate('test-runner')}
@@ -254,11 +158,7 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
             </button>
 
             {/* User Profile & Login modal trigger */}
-            <button
-              onClick={() => setIsLoginModalOpen(true)}
-              className="flex items-center gap-2 pl-2 pr-2.5 py-1 rounded-lg bg-blue-950 hover:bg-blue-900 border border-blue-800 transition-colors text-left"
-              title="Click to Switch User / Log In with Credentials"
-            >
+            <div className="flex items-center gap-2 pl-2 pr-2.5 py-1 rounded-lg bg-blue-950 border border-blue-800 text-left">
               <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold text-xs">
                 {currentUser.name.charAt(0)}
               </div>
@@ -271,7 +171,7 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
                   {currentUser.ddoIds.length > 0 && ` • DDO ${currentUser.ddoIds[0]}`}
                 </div>
               </div>
-            </button>
+            </div>
           </div>
         </div>
       </header>
@@ -355,9 +255,6 @@ export const Shell: React.FC<ShellProps> = ({ currentView, onNavigate, children 
           <div className="max-w-7xl mx-auto space-y-6">{children}</div>
         </main>
       </div>
-
-      {/* LOGIN / PROFILE MODAL */}
-      <LoginModal isOpen={isLoginModalOpen} onClose={() => setIsLoginModalOpen(false)} />
 
       {/* RESET CONFIRMATION MODAL */}
       <Modal

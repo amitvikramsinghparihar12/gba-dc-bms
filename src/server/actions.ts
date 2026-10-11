@@ -77,6 +77,10 @@ export async function updateDdoAllocationAction(allocationId: string, newAllocat
   return run(() => dc.updateDdoAllocation(allocationId, newAllocated));
 }
 
+export async function assignDdoToBudgetHeadAction(ddoId: string, grantId: string) {
+  return run(() => dc.assignDdoToBudgetHead(ddoId, grantId));
+}
+
 export async function requestBudgetChangeAction(req: {
   ddoId: string;
   type: 'increase' | 'decrease';
@@ -130,7 +134,7 @@ export async function getUsersAction() {
   return run(() => dc.getUsers());
 }
 
-export async function createUserAction(user: Omit<User, 'id'>) {
+export async function createUserAction(user: Omit<User, 'id'> & { password?: string }) {
   return run(() => dc.createUser(user));
 }
 

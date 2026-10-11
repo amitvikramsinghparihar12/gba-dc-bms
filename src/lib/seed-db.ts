@@ -13,26 +13,26 @@ function rupees(paiseValue: number): string {
 
 async function clearOperationalData(admin: SupabaseClient) {
   const tables = [
-    'audit_logs',
-    'bill_history',
-    'bill_attachments',
-    'bill_deductions',
-    'bills',
-    'rtgs_batches',
-    'budget_change_requests',
-    'ddo_allocations',
-    'budget_grants',
-    'vendor_documents',
-    'vendors',
-    'user_ddo_mappings',
-    'verifier_creator_mappings',
-    'ddos',
-    'departments',
-    'corporate_bank_accounts',
-  ];
+    ['audit_logs', 'id'],
+    ['bill_history', 'id'],
+    ['bill_attachments', 'id'],
+    ['bill_deductions', 'bill_id'],
+    ['bills', 'id'],
+    ['rtgs_batches', 'id'],
+    ['budget_change_requests', 'id'],
+    ['ddo_allocations', 'id'],
+    ['budget_grants', 'id'],
+    ['vendor_documents', 'vendor_id'],
+    ['vendors', 'id'],
+    ['user_ddo_mappings', 'user_id'],
+    ['verifier_creator_mappings', 'verifier_id'],
+    ['ddos', 'id'],
+    ['departments', 'id'],
+    ['corporate_bank_accounts', 'id'],
+  ] as const;
 
-  for (const table of tables) {
-    const { error } = await admin.from(table).delete().not('id', 'is', null);
+  for (const [table, column] of tables) {
+    const { error } = await admin.from(table).delete().not(column, 'is', null);
     throwIf(error);
   }
 }
@@ -74,6 +74,8 @@ export async function seedAll(admin: SupabaseClient) {
   const seed = getInitialSeedData();
   const authIds = await ensureAuthUsers(admin, seed.users);
 
+  const identityProbe = await admin.from('profiles').select('username').limit(1);
+  const hasIdentity = !identityProbe.error;
   const { error: profileError } = await admin.from('profiles').upsert(
     seed.users.map((user) => ({
       id: user.id,
@@ -82,6 +84,14 @@ export async function seedAll(admin: SupabaseClient) {
       email: user.email,
       role: user.role,
       active: user.active,
+      ...(hasIdentity
+        ? {
+            username: user.username,
+            first_name: user.firstName,
+            last_name: user.lastName,
+            mobile: user.mobile,
+          }
+        : {}),
     }))
   );
   throwIf(profileError);
@@ -116,6 +126,8 @@ export async function seedAll(admin: SupabaseClient) {
     throwIf((await admin.from('verifier_creator_mappings').insert(creatorMappings)).error);
   }
 
+  const vendorProbe = await admin.from('vendors').select('pan').limit(1);
+  const hasVendorMaster = !vendorProbe.error;
   throwIf((await admin.from('vendors').insert(
     seed.vendors.map((vendor) => ({
       id: vendor.id,
@@ -128,6 +140,18 @@ export async function seedAll(admin: SupabaseClient) {
       branch_name: vendor.branchName,
       address: vendor.address,
       active: vendor.active,
+      ...(hasVendorMaster
+        ? {
+            pan: vendor.pan,
+            city: vendor.city,
+            pin_code: vendor.pinCode,
+            phone: vendor.phone,
+            email: vendor.email,
+            micr: vendor.micr,
+            account_holder_name: vendor.accountHolderName,
+            old_id: vendor.oldId || null,
+          }
+        : {}),
     }))
   )).error);
 
@@ -141,13 +165,32 @@ export async function seedAll(admin: SupabaseClient) {
   );
   throwIf((await admin.from('vendor_documents').insert(documents)).error);
 
+  const headProbe = await admin.from('budget_grants').select('code').limit(1);
+  const hasHeadColumns = !headProbe.error;
+  if (!hasHeadColumns) {
+    throwIf((await admin.from('departments').insert(
+      seed.budgetGrants.map((grant) => ({
+        id: `HD-${grant.code}`,
+        name: grant.name,
+      }))
+    )).error);
+  }
   throwIf((await admin.from('budget_grants').insert(
-    seed.budgetGrants.map((grant) => ({
-      id: grant.id,
-      financial_year: grant.financialYear,
-      department_id: grant.departmentId,
-      total_granted: rupees(paise(grant.totalGranted)),
-    }))
+    seed.budgetGrants.map((grant) => hasHeadColumns
+      ? {
+          id: grant.id,
+          financial_year: grant.financialYear,
+          code: grant.code,
+          name: grant.name,
+          department_id: null,
+          total_granted: rupees(paise(grant.totalGranted)),
+        }
+      : {
+          id: grant.id,
+          financial_year: grant.financialYear,
+          department_id: `HD-${grant.code}`,
+          total_granted: rupees(paise(grant.totalGranted)),
+        })
   )).error);
 
   throwIf((await admin.from('ddo_allocations').insert(
@@ -215,7 +258,18 @@ export async function seedAll(admin: SupabaseClient) {
       updated_at: bill.updatedAt,
     };
   });
-  throwIf((await admin.from('bills').insert(billRows)).error);
+  let billInsert = await admin.from('bills').insert(billRows);
+  if (billInsert.error?.message.includes('bills_rtgs_batch_id_key')) {
+    const seen = new Set<string>();
+    billInsert = await admin.from('bills').insert(
+      billRows.map((row) => {
+        if (!row.rtgs_batch_id || seen.has(row.rtgs_batch_id)) return { ...row, rtgs_batch_id: null };
+        seen.add(row.rtgs_batch_id);
+        return row;
+      })
+    );
+  }
+  throwIf(billInsert.error);
 
   const deductionRows = seed.bills.flatMap((bill) =>
     bill.deductions.map((item, index) => ({

@@ -20,7 +20,15 @@ import {
   WorkflowConfig,
 } from '../types';
 import { calculateBillFinancials, round2 } from '../utils/calc';
-import { canTransitionStatus, isValidDdoId, isValidGSTIN, isValidIFSC, BANK_ACCOUNT_REGEX } from '../utils/validators';
+import {
+  canTransitionStatus,
+  isValidDdoId,
+  isValidGSTIN,
+  isValidIFSC,
+  BANK_ACCOUNT_REGEX,
+  assertVendorMaster,
+  assertUserIdentity,
+} from '../utils/validators';
 import { dbError, throwIf } from './db-error';
 import { seedAll } from './seed-db';
 import { createAdminClient } from './supabase/admin';
@@ -121,12 +129,20 @@ function mapAllocation(row: any): DdoAllocation {
 }
 
 function mapGrant(row: any): BudgetGrant {
+  const linkedName = row.departments?.name;
   return {
     id: row.id,
+    code: row.code || row.id,
+    name: row.name || linkedName || row.code || row.id,
     financialYear: row.financial_year,
-    departmentId: row.department_id,
+    departmentId: row.department_id || '',
     totalGranted: num(row.total_granted),
   };
+}
+
+async function hasBudgetHeadColumns(admin: SupabaseClient): Promise<boolean> {
+  const probe = await admin.from('budget_grants').select('code').limit(1);
+  return !probe.error;
 }
 
 function mapVendor(row: any): Vendor {
@@ -135,18 +151,32 @@ function mapVendor(row: any): Vendor {
     name: row.name,
     type: row.type,
     gstin: row.gstin,
+    pan: row.pan || undefined,
+    city: row.city || undefined,
+    pinCode: row.pin_code || undefined,
+    phone: row.phone || undefined,
+    email: row.email || undefined,
+    oldId: row.old_id || undefined,
     bankAccountNumber: row.bank_account_number,
     ifsc: row.ifsc,
     bankName: row.bank_name,
     branchName: row.branch_name,
+    micr: row.micr || undefined,
+    accountHolderName: row.account_holder_name || undefined,
     address: row.address,
     active: row.active,
     documents: (row.vendor_documents || []).map((document: any) => ({
       name: document.name,
       status: document.status,
       uploadedAt: document.uploaded_at || undefined,
+      fileName: document.file_name || undefined,
     })),
   };
+}
+
+async function hasColumn(admin: SupabaseClient, table: string, column: string): Promise<boolean> {
+  const probe = await admin.from(table).select(column).limit(1);
+  return !probe.error;
 }
 
 function mapRequest(row: any): BudgetChangeRequest {
@@ -220,6 +250,10 @@ async function loadUsers(admin: SupabaseClient): Promise<User[]> {
   return (profiles || []).map((profile) => ({
     id: profile.id,
     name: profile.name,
+    username: profile.username || undefined,
+    firstName: profile.first_name || undefined,
+    lastName: profile.last_name || undefined,
+    mobile: profile.mobile || undefined,
     email: profile.email,
     role: profile.role as Role,
     ddoIds: (ddoMaps || []).filter((row) => row.user_id === profile.id).map((row) => row.ddo_id),
@@ -250,6 +284,13 @@ async function requireActor(): Promise<{ admin: SupabaseClient; actor: User }> {
 
 function assertDdoAccess(actor: User, ddoId: string) {
   if (['Creator', 'Verifier', 'Approver'].includes(actor.role) && !actor.ddoIds.includes(ddoId)) {
+    throw new Error(`Forbidden: Access denied to DDO ${ddoId} (HTTP 403)`);
+  }
+  if (
+    (actor.role === 'Finance Officer' || actor.role === 'Director of Finance') &&
+    actor.ddoIds.length > 0 &&
+    !actor.ddoIds.includes(ddoId)
+  ) {
     throw new Error(`Forbidden: Access denied to DDO ${ddoId} (HTTP 403)`);
   }
 }
@@ -352,6 +393,9 @@ function visibleTo(actor: User, bill: Bill): boolean {
     return true;
   }
   if (actor.role === 'Approver') return actor.ddoIds.includes(bill.ddoId);
+  if ((actor.role === 'Finance Officer' || actor.role === 'Director of Finance') && actor.ddoIds.length > 0) {
+    return actor.ddoIds.includes(bill.ddoId);
+  }
   if (actor.role === 'RTGS Manager') return bill.status === 'Pending RTGS' || bill.status === 'Paid';
   return true;
 }
@@ -373,6 +417,8 @@ export async function getBills(filters?: { status?: string; search?: string; ddo
 
   if (['Creator', 'Verifier', 'Approver'].includes(actor.role)) {
     if (actor.ddoIds.length === 0) return [];
+    query = query.in('ddo_id', actor.ddoIds);
+  } else if ((actor.role === 'Finance Officer' || actor.role === 'Director of Finance') && actor.ddoIds.length > 0) {
     query = query.in('ddo_id', actor.ddoIds);
   } else if (actor.role === 'RTGS Manager') {
     query = query.in('status', ['Pending RTGS', 'Paid']);
@@ -617,8 +663,8 @@ export async function verifyBill(billId: string, remarks?: string): Promise<Bill
 
 export async function rejectBill(billId: string, remarks: string): Promise<Bill> {
   const { admin, actor } = await requireActor();
-  if (actor.role === 'Verifier') assertPermission(actor.role, 'reject:verifier_bill');
-  else if (actor.role === 'Approver') assertPermission(actor.role, 'revert:approver_bill');
+  if (actor.role === 'Verifier' || actor.role === 'Finance Officer') assertPermission(actor.role, 'reject:verifier_bill');
+  else if (actor.role === 'Approver' || actor.role === 'Director of Finance') assertPermission(actor.role, 'revert:approver_bill');
   else throw new Error(`Role '${actor.role}' cannot reject bills.`);
 
   const workflow = await getWorkflow(admin);
@@ -630,7 +676,16 @@ export async function rejectBill(billId: string, remarks: string): Promise<Bill>
 
   const bill = await fetchBill(admin, billId);
   assertDdoAccess(actor, bill.ddoId);
-  const action = actor.role === 'Verifier' ? 'BILL_REJECTED_BY_VERIFIER' : 'BILL_REVERTED_BY_APPROVER';
+  if ((actor.role === 'Verifier' || actor.role === 'Finance Officer') && bill.status !== 'Pending Verification') {
+    throw new Error(`Cannot reject bill in status '${bill.status}'. Must be 'Pending Verification'.`);
+  }
+  if ((actor.role === 'Approver' || actor.role === 'Director of Finance') && bill.status !== 'Pending Approval') {
+    throw new Error(`Cannot reject bill in status '${bill.status}'. Must be 'Pending Approval'.`);
+  }
+  const action =
+    actor.role === 'Verifier' || actor.role === 'Finance Officer'
+      ? 'BILL_REJECTED_BY_VERIFIER'
+      : 'BILL_REVERTED_BY_APPROVER';
   const { error } = await admin.rpc('reject_bill', {
     p_actor_id: actor.id,
     p_bill_id: billId,
@@ -722,9 +777,81 @@ export async function getRtgsBatchById(batchId: string) {
   return { batch, bills: (billRows || []).map(mapBill), bankAccount: mapBank(bank) };
 }
 
+async function saveLegacyBudgetHead(
+  admin: SupabaseClient,
+  actor: User,
+  input: { id?: string; code: string; name: string; totalGranted: number; financialYear: string }
+): Promise<BudgetGrant> {
+  const deptId = `HD-${input.code}`;
+  const existing = input.id
+    ? (await admin.from('budget_grants').select('*').eq('id', input.id).maybeSingle()).data
+    : null;
+  if (existing) {
+    const { data: allocations, error } = await admin.from('ddo_allocations').select('allocated').eq('grant_id', existing.id);
+    throwIf(error);
+    const used = (allocations || []).reduce((sum, row) => sum + num(row.allocated), 0);
+    if (input.totalGranted < used) {
+      throw new Error(`Cannot decrease this budget head to ₹${input.totalGranted} because ₹${used} is already allocated to DDOs.`);
+    }
+    throwIf((await admin.from('departments').upsert({ id: existing.department_id || deptId, name: input.name })).error);
+    throwIf(
+      (
+        await admin
+          .from('budget_grants')
+          .update({ total_granted: money(input.totalGranted), financial_year: input.financialYear })
+          .eq('id', existing.id)
+      ).error
+    );
+    await writeAudit(admin, actor, {
+      actionType: input.totalGranted >= num(existing.total_granted) ? 'BUDGET_HEAD_INCREASED' : 'BUDGET_HEAD_DECREASED',
+      entityType: 'BudgetGrant',
+      entityId: existing.id,
+      oldValue: { totalGranted: num(existing.total_granted) },
+      newValue: { code: input.code, name: input.name, totalGranted: round2(input.totalGranted) },
+    });
+    return {
+      id: existing.id,
+      code: input.code,
+      name: input.name,
+      financialYear: input.financialYear,
+      departmentId: existing.department_id || deptId,
+      totalGranted: round2(input.totalGranted),
+    };
+  }
+
+  throwIf((await admin.from('departments').insert({ id: deptId, name: input.name })).error);
+  const { error } = await admin.from('budget_grants').insert({
+    id: input.code,
+    financial_year: input.financialYear,
+    department_id: deptId,
+    total_granted: money(input.totalGranted),
+  });
+  if (error) {
+    if (error.message.includes('duplicate') || error.message.includes('uq_dept_fy')) {
+      throw new Error(`Budget head ${input.code} already exists for ${input.financialYear}.`);
+    }
+    throw new Error(dbError(error.message));
+  }
+  await writeAudit(admin, actor, {
+    actionType: 'BUDGET_HEAD_CREATED',
+    entityType: 'BudgetGrant',
+    entityId: input.code,
+    oldValue: null,
+    newValue: { code: input.code, name: input.name, totalGranted: round2(input.totalGranted) },
+  });
+  return {
+    id: input.code,
+    code: input.code,
+    name: input.name,
+    financialYear: input.financialYear,
+    departmentId: deptId,
+    totalGranted: round2(input.totalGranted),
+  };
+}
+
 export async function getBudgetGrants(): Promise<BudgetGrant[]> {
   const { admin } = await requireActor();
-  const { data, error } = await admin.from('budget_grants').select('*').order('id');
+  const { data, error } = await admin.from('budget_grants').select('*, departments(name)').order('id');
   throwIf(error);
   return (data || []).map(mapGrant);
 }
@@ -732,11 +859,16 @@ export async function getBudgetGrants(): Promise<BudgetGrant[]> {
 export async function createOrUpdateGrant(grantInput: Partial<BudgetGrant>): Promise<BudgetGrant> {
   const { admin, actor } = await requireActor();
   assertPermission(actor.role, 'manage:budget_grants');
-  if (!grantInput.departmentId || !grantInput.totalGranted || grantInput.totalGranted <= 0) {
-    throw new Error('Valid department and positive grant amount are required.');
+  const code = (grantInput.code || '').trim().toUpperCase();
+  const name = (grantInput.name || '').trim();
+  if (!code || !name || !grantInput.totalGranted || grantInput.totalGranted <= 0) {
+    throw new Error('Budget head code, name, and a positive grant amount are required.');
   }
   const workflow = await getWorkflow(admin);
   const financialYear = grantInput.financialYear || workflow.financialYear;
+  if (!(await hasBudgetHeadColumns(admin))) {
+    return saveLegacyBudgetHead(admin, actor, { code, name, totalGranted: grantInput.totalGranted, financialYear, id: grantInput.id });
+  }
   const existing = grantInput.id
     ? (await admin.from('budget_grants').select('*').eq('id', grantInput.id).maybeSingle()).data
     : null;
@@ -746,47 +878,61 @@ export async function createOrUpdateGrant(grantInput: Partial<BudgetGrant>): Pro
     throwIf(error);
     const used = (allocations || []).reduce((sum, row) => sum + num(row.allocated), 0);
     if (grantInput.totalGranted < used) {
-      throw new Error(`Cannot reduce grant to ₹${grantInput.totalGranted} because ₹${used} is already allocated to DDOs.`);
+      throw new Error(`Cannot decrease this budget head to ₹${grantInput.totalGranted} because ₹${used} is already allocated to DDOs.`);
     }
     throwIf(
       (
         await admin
           .from('budget_grants')
-          .update({ total_granted: money(grantInput.totalGranted), financial_year: financialYear })
+          .update({
+            code,
+            name,
+            total_granted: money(grantInput.totalGranted),
+            financial_year: financialYear,
+          })
           .eq('id', existing.id)
       ).error
     );
     await writeAudit(admin, actor, {
-      actionType: 'GRANT_UPDATED',
+      actionType: grantInput.totalGranted >= num(existing.total_granted) ? 'BUDGET_HEAD_INCREASED' : 'BUDGET_HEAD_DECREASED',
       entityType: 'BudgetGrant',
       entityId: existing.id,
       oldValue: { totalGranted: num(existing.total_granted) },
-      newValue: { totalGranted: round2(grantInput.totalGranted) },
+      newValue: { code, name, totalGranted: round2(grantInput.totalGranted) },
     });
-    return { id: existing.id, financialYear, departmentId: existing.department_id, totalGranted: round2(grantInput.totalGranted) };
+    return mapGrant({ ...existing, code, name, financial_year: financialYear, total_granted: grantInput.totalGranted });
   }
 
-  const id = `GRT-${financialYear.split('-')[0]}-${grantInput.departmentId.replace('DEP-', '')}`;
+  const id = code;
   const { error } = await admin.from('budget_grants').insert({
     id,
+    code,
+    name,
     financial_year: financialYear,
-    department_id: grantInput.departmentId,
+    department_id: null,
     total_granted: money(grantInput.totalGranted),
   });
   if (error) {
-    if (error.message.includes('uq_dept_fy') || error.message.includes('duplicate')) {
-      throw new Error('A grant for this department and financial year already exists.');
+    if (error.message.includes('duplicate') || error.message.includes('uq_budget_head_fy')) {
+      throw new Error(`Budget head ${code} already exists for ${financialYear}.`);
     }
     throw new Error(dbError(error.message));
   }
   await writeAudit(admin, actor, {
-    actionType: 'GRANT_CREATED',
+    actionType: 'BUDGET_HEAD_CREATED',
     entityType: 'BudgetGrant',
     entityId: id,
     oldValue: null,
-    newValue: { totalGranted: round2(grantInput.totalGranted) },
+    newValue: { code, name, totalGranted: round2(grantInput.totalGranted) },
   });
-  return { id, financialYear, departmentId: grantInput.departmentId, totalGranted: round2(grantInput.totalGranted) };
+  return {
+    id,
+    code,
+    name,
+    financialYear,
+    departmentId: '',
+    totalGranted: round2(grantInput.totalGranted),
+  };
 }
 
 export async function getDdoAllocations(): Promise<DdoAllocation[]> {
@@ -794,6 +940,8 @@ export async function getDdoAllocations(): Promise<DdoAllocation[]> {
   let query = admin.from('ddo_allocations').select('*').order('ddo_id');
   if (['Creator', 'Verifier', 'Approver'].includes(actor.role)) {
     if (actor.ddoIds.length === 0) return [];
+    query = query.in('ddo_id', actor.ddoIds);
+  } else if ((actor.role === 'Finance Officer' || actor.role === 'Director of Finance') && actor.ddoIds.length > 0) {
     query = query.in('ddo_id', actor.ddoIds);
   }
   const { data, error } = await query;
@@ -818,6 +966,45 @@ export async function updateDdoAllocation(allocationId: string, newAllocated: nu
     utilized: num(data.utilized),
     remaining: num(data.remaining),
   };
+}
+
+export async function assignDdoToBudgetHead(ddoId: string, grantId: string): Promise<DdoAllocation> {
+  const { admin, actor } = await requireActor();
+  assertPermission(actor.role, 'manage:ddo_allocations');
+  const { data: grant, error: grantError } = await admin.from('budget_grants').select('*').eq('id', grantId).maybeSingle();
+  throwIf(grantError);
+  if (!grant) throw new Error(`Budget head ${grantId} was not found.`);
+
+  const { data: existing, error: existingError } = await admin
+    .from('ddo_allocations')
+    .select('*')
+    .eq('ddo_id', ddoId)
+    .maybeSingle();
+  throwIf(existingError);
+
+  if (existing) {
+    throwIf((await admin.from('ddo_allocations').update({ grant_id: grantId, updated_at: new Date().toISOString() }).eq('id', existing.id)).error);
+    await writeAudit(admin, actor, {
+      actionType: 'DDO_ASSIGNED_TO_BUDGET_HEAD',
+      entityType: 'DdoAllocation',
+      entityId: existing.id,
+      oldValue: { grantId: existing.grant_id },
+      newValue: { grantId, ddoId },
+    });
+    return mapAllocation({ ...existing, grant_id: grantId });
+  }
+
+  const id = `ALC-${grantId}-${ddoId}`;
+  const row = { id, grant_id: grantId, ddo_id: ddoId, allocated: 0, utilized: 0 };
+  throwIf((await admin.from('ddo_allocations').insert(row)).error);
+  await writeAudit(admin, actor, {
+    actionType: 'DDO_ASSIGNED_TO_BUDGET_HEAD',
+    entityType: 'DdoAllocation',
+    entityId: id,
+    oldValue: null,
+    newValue: { grantId, ddoId, allocated: 0 },
+  });
+  return mapAllocation(row);
 }
 
 export async function requestBudgetChange(req: {
@@ -935,7 +1122,9 @@ export async function getDepartments(): Promise<Department[]> {
   const { admin } = await requireActor();
   const { data, error } = await admin.from('departments').select('*').order('name');
   throwIf(error);
-  return (data || []).map((row) => ({ id: row.id, name: row.name, createdAt: row.created_at }));
+  return (data || [])
+    .filter((row) => !String(row.id).startsWith('HD-'))
+    .map((row) => ({ id: row.id, name: row.name, createdAt: row.created_at }));
 }
 
 export async function createDepartment(dept: { name: string }): Promise<Department> {
@@ -968,6 +1157,8 @@ export async function createDDO(ddoData: { id: string; name: string; departmentI
   const { admin, actor } = await requireActor();
   assertPermission(actor.role, 'manage:ddos');
   if (!isValidDdoId(ddoData.id)) throw new Error('DDO ID must be a valid 6 or 7-digit numeric code.');
+  if (!ddoData.departmentId) throw new Error('A DDO must belong to one department.');
+
   const ddo: DDO = { id: ddoData.id.trim(), name: ddoData.name.trim(), departmentId: ddoData.departmentId };
   const { error } = await admin.from('ddos').insert({ id: ddo.id, name: ddo.name, department_id: ddo.departmentId });
   if (error) {
@@ -977,25 +1168,6 @@ export async function createDDO(ddoData: { id: string; name: string; departmentI
     throw new Error(dbError(error.message));
   }
 
-  const { data: grant } = await admin
-    .from('budget_grants')
-    .select('id')
-    .eq('department_id', ddo.departmentId)
-    .limit(1)
-    .maybeSingle();
-  if (grant) {
-    throwIf(
-      (
-        await admin.from('ddo_allocations').insert({
-          id: `ALC-${ddo.departmentId.replace('DEP-', '')}-${ddo.id}`,
-          grant_id: grant.id,
-          ddo_id: ddo.id,
-          allocated: 0,
-          utilized: 0,
-        })
-      ).error
-    );
-  }
   await writeAudit(admin, actor, {
     actionType: 'DDO_CREATED',
     entityType: 'DDO',
@@ -1008,9 +1180,10 @@ export async function createDDO(ddoData: { id: string; name: string; departmentI
 
 export async function getVendors(): Promise<Vendor[]> {
   const { admin } = await requireActor();
+  const hasFileName = await hasColumn(admin, 'vendor_documents', 'file_name');
   const { data, error } = await admin
     .from('vendors')
-    .select('*, vendor_documents(name, status, uploaded_at)')
+    .select(hasFileName ? '*, vendor_documents(name, status, uploaded_at, file_name)' : '*, vendor_documents(name, status, uploaded_at)')
     .order('id');
   throwIf(error);
   return (data || []).map(mapVendor);
@@ -1026,6 +1199,11 @@ export async function createVendor(
   if (!BANK_ACCOUNT_REGEX.test(vendorData.bankAccountNumber)) {
     throw new Error('Bank account number must be 9 to 18 digits.');
   }
+  assertVendorMaster(vendorData);
+  const hasVendorMaster = await hasColumn(admin, 'vendors', 'pan');
+  if (!hasVendorMaster) {
+    throw new Error('Vendor master columns are missing. Run the alter statements at the end of supabase/schema.sql in the Supabase SQL editor, then try again.');
+  }
 
   const { count, error: countError } = await admin.from('vendors').select('id', { count: 'exact', head: true });
   throwIf(countError);
@@ -1033,6 +1211,14 @@ export async function createVendor(
     ...vendorData,
     gstin: vendorData.gstin.trim().toUpperCase(),
     ifsc: vendorData.ifsc.trim().toUpperCase(),
+    pan: vendorData.pan?.trim().toUpperCase(),
+    city: vendorData.city?.trim(),
+    pinCode: vendorData.pinCode?.trim(),
+    phone: vendorData.phone?.trim(),
+    email: vendorData.email?.trim().toLowerCase(),
+    micr: vendorData.micr?.trim(),
+    accountHolderName: vendorData.accountHolderName?.trim(),
+    oldId: vendorData.oldId?.trim() || '',
     id: `V-${String((count || 0) + 1).padStart(4, '0')}`,
     active: true,
     documents: [
@@ -1055,6 +1241,14 @@ export async function createVendor(
         branch_name: vendor.branchName,
         address: vendor.address,
         active: true,
+        pan: vendor.pan,
+        city: vendor.city,
+        pin_code: vendor.pinCode,
+        phone: vendor.phone,
+        email: vendor.email,
+        micr: vendor.micr,
+        account_holder_name: vendor.accountHolderName,
+        old_id: vendor.oldId || null,
       })
     ).error
   );
@@ -1114,28 +1308,57 @@ export async function getUsers(): Promise<User[]> {
   return loadUsers(admin);
 }
 
-export async function createUser(userData: Omit<User, 'id'>): Promise<User> {
+async function assertOneCreatorPerDdo(admin: SupabaseClient, role: Role, ddoIds: string[], exceptUserId?: string) {
+  if (role !== 'Creator') return;
+  if (ddoIds.length > 1) throw new Error('A Creator can belong to only one DDO.');
+  if (ddoIds.length === 0) return;
+  const users = await loadUsers(admin);
+  const taken = users.find(
+    (user) => user.role === 'Creator' && user.active && user.id !== exceptUserId && user.ddoIds.includes(ddoIds[0])
+  );
+  if (taken) {
+    throw new Error(`DDO ${ddoIds[0]} already has creator ${taken.name}. Move or deactivate that creator first.`);
+  }
+}
+
+export async function createUser(userData: Omit<User, 'id'> & { password?: string }): Promise<User> {
   const { admin, actor } = await requireActor();
   assertPermission(actor.role, 'manage:users');
+  assertUserIdentity(userData);
+  const displayName = `${userData.firstName?.trim()} ${userData.lastName?.trim()}`.trim();
+  const hasIdentity = await hasColumn(admin, 'profiles', 'username');
+  if (!hasIdentity) {
+    throw new Error('User identity columns are missing. Run the alter statements at the end of supabase/schema.sql in the Supabase SQL editor, then try again.');
+  }
+  const existing = await loadUsers(admin);
+  if (existing.some((user) => user.username?.toLowerCase() === userData.username?.trim().toLowerCase())) {
+    throw new Error(`User name ${userData.username} is already in use.`);
+  }
+  const password = userData.password && userData.password.length >= 8 ? userData.password : DEMO_PASSWORD;
   const id = `USR-${Date.now().toString(36).toUpperCase()}`;
   const { data, error } = await admin.auth.admin.createUser({
     email: userData.email.trim().toLowerCase(),
-    password: DEMO_PASSWORD,
+    password,
     email_confirm: true,
-    user_metadata: { name: userData.name, role: userData.role, profile_id: id },
+    user_metadata: { name: displayName, role: userData.role, profile_id: id },
   });
   if (error) throw new Error(dbError(error.message));
 
   const { error: profileError } = await admin.from('profiles').insert({
     id,
     auth_user_id: data.user?.id,
-    name: userData.name.trim(),
+    name: displayName,
+    username: userData.username?.trim(),
+    first_name: userData.firstName?.trim(),
+    last_name: userData.lastName?.trim(),
+    mobile: userData.mobile?.trim(),
     email: userData.email.trim().toLowerCase(),
     role: userData.role,
     active: userData.active,
   });
   if (profileError) throw new Error(dbError(profileError.message));
 
+  await assertOneCreatorPerDdo(admin, userData.role, userData.ddoIds || []);
   if (userData.ddoIds?.length) {
     throwIf(
       (
@@ -1157,9 +1380,10 @@ export async function createUser(userData: Omit<User, 'id'>): Promise<User> {
     entityType: 'User',
     entityId: id,
     oldValue: null,
-    newValue: { id, name: userData.name, role: userData.role, ddoIds: userData.ddoIds },
+    newValue: { id, name: displayName, username: userData.username, role: userData.role, ddoIds: userData.ddoIds },
   });
-  return { ...userData, id, email: userData.email.trim().toLowerCase() };
+  const { password: _password, ...stored } = userData;
+  return { ...stored, id, name: displayName, email: userData.email.trim().toLowerCase() };
 }
 
 export async function updateUserMappings(
@@ -1171,6 +1395,9 @@ export async function updateUserMappings(
   const users = await loadUsers(admin);
   const target = users.find((user) => user.id === userId);
   if (!target) throw new Error(`User '${userId}' not found.`);
+  const nextRole = updates.role || target.role;
+  const nextDdoIds = updates.ddoIds || target.ddoIds;
+  if (updates.ddoIds || updates.role) await assertOneCreatorPerDdo(admin, nextRole, nextDdoIds, userId);
 
   if (updates.role || updates.active !== undefined) {
     throwIf(

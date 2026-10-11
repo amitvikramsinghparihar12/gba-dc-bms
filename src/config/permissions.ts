@@ -43,10 +43,14 @@ export const ROLE_PERMISSIONS: Record<Role, Action[]> = {
   ],
   'Director of Finance': [
     'manage:budget_grants',
+    'approve:bill',
+    'revert:approver_bill',
   ],
   'Finance Officer': [
     'manage:ddo_allocations',
     'decide:budget_requests',
+    'verify:bill',
+    'reject:verifier_bill',
   ],
   'Creator': [
     'create:bill',

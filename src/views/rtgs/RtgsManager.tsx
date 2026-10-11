@@ -5,6 +5,7 @@ import { Bill, Vendor, RtgsBatch, CorporateBankAccount } from '../../types';
 import { formatINR, numberToIndianWords } from '../../utils/calc';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { Modal } from '../../components/common/Modal';
+import { BusyOverlay, PageLoader } from '../../components/common/PageLoader';
 import {
   CreditCard,
   Printer,
@@ -154,17 +155,24 @@ export const RtgsManager: React.FC = () => {
 
   // View past batch
   const handleViewPastBatch = async (batchId: string) => {
+    setLoading(true);
     try {
       const adviceData = await api.getRtgsBatchById(currentUser, batchId);
       setActiveAdviceBatch(adviceData);
     } catch (err: any) {
       addToast({ type: 'error', title: 'Could not load batch', message: err.message });
+    } finally {
+      setLoading(false);
     }
   };
 
   const selectedBank = bankAccounts.find((b) => b.id === selectedBankId);
 
+  if (loading) return <PageLoader label="Loading RTGS advice…" />;
+
   return (
+    <>
+      {isGenerating && <BusyOverlay label="Generating RTGS advice…" />}
     <div className="space-y-6">
       {/* Top Banner */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -654,5 +662,6 @@ export const RtgsManager: React.FC = () => {
         </Modal>
       )}
     </div>
+    </>
   );
 };

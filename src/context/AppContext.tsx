@@ -4,9 +4,9 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { useRouter } from 'next/navigation';
 import { Department, DDO, Role, User, WorkflowConfig } from '../types';
 import { api } from '../lib/api';
-import { DEMO_PASSWORD } from '../config/demo';
 import { createBrowserSupabase } from '../lib/supabase/client';
 import { getBootstrapAction } from '../server/actions';
+import { BusyOverlay } from '../components/common/PageLoader';
 
 interface ToastMessage {
   id: string;
@@ -22,12 +22,11 @@ interface AppContextType {
   departments: Department[];
   ddos: DDO[];
   activeRole: Role;
-  switchRole: (role: Role) => Promise<boolean>;
-  switchUser: (userId: string) => Promise<boolean>;
   signInWithCredentials: (email: string, password: string) => Promise<boolean>;
   signOut: () => Promise<void>;
   refreshData: () => Promise<void>;
   resetDemoData: () => Promise<void>;
+  busyMessage: string | null;
   workflowConfig: WorkflowConfig | null;
   toasts: ToastMessage[];
   addToast: (toast: Omit<ToastMessage, 'id'>) => void;
@@ -45,6 +44,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [workflowConfig, setWorkflowConfig] = useState<WorkflowConfig | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [busyMessage, setBusyMessage] = useState<string | null>(null);
 
   const addToast = useCallback((toast: Omit<ToastMessage, 'id'>) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -83,6 +83,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const signInWithCredentials = useCallback(
     async (email: string, password: string) => {
+      setBusyMessage('Signing in…');
       try {
         const supabase = createBrowserSupabase();
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
@@ -96,38 +97,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (error: any) {
         addToast({ type: 'error', title: 'Authentication failed', message: error.message });
         return false;
+      } finally {
+        setBusyMessage(null);
       }
     },
     [addToast, refreshData, router]
-  );
-
-  const switchUser = useCallback(
-    async (userId: string) => {
-      const target = users.find((user) => user.id === userId);
-      if (!target) return false;
-      const ok = await signInWithCredentials(target.email, DEMO_PASSWORD);
-      if (ok) {
-        addToast({
-          type: 'info',
-          title: `Signed in as ${target.name}`,
-          message: `Role: ${target.role}`,
-        });
-      }
-      return ok;
-    },
-    [users, signInWithCredentials, addToast]
-  );
-
-  const switchRole = useCallback(
-    async (role: Role) => {
-      const candidate = users.find((user) => user.role === role);
-      if (!candidate) {
-        addToast({ type: 'error', title: 'No account for that role', message: role });
-        return false;
-      }
-      return switchUser(candidate.id);
-    },
-    [users, switchUser, addToast]
   );
 
   const signOut = useCallback(async () => {
@@ -137,6 +111,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const resetDemoData = useCallback(async () => {
+    setBusyMessage('Restoring demo data…');
     try {
       await api.resetDemo();
       await refreshData();
@@ -147,6 +122,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     } catch (error: any) {
       addToast({ type: 'error', title: 'Reset failed', message: error.message });
+    } finally {
+      setBusyMessage(null);
     }
   }, [addToast, refreshData]);
 
@@ -183,18 +160,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         departments,
         ddos,
         activeRole: currentUser.role,
-        switchRole,
-        switchUser,
         signInWithCredentials,
         signOut,
         refreshData,
         resetDemoData,
+        busyMessage,
         workflowConfig,
         toasts,
         addToast,
         removeToast,
       }}
     >
+      {busyMessage && <BusyOverlay label={busyMessage} />}
       {children}
     </AppContext.Provider>
   );

@@ -30,6 +30,10 @@ export interface DDO {
 export interface User {
   id: string;
   name: string;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  mobile?: string;
   email: string;
   role: Role;
   passwordHash?: string;
@@ -42,6 +46,7 @@ export interface VendorDocument {
   name: string;
   status: 'Uploaded' | 'Pending';
   uploadedAt?: string;
+  fileName?: string;
 }
 
 export interface Vendor {
@@ -49,10 +54,18 @@ export interface Vendor {
   name: string;
   type: 'Contractor' | 'Supplier' | 'Consultant' | 'Service Provider';
   gstin: string;
+  pan?: string;
+  city?: string;
+  pinCode?: string;
+  phone?: string;
+  email?: string;
+  oldId?: string;
   bankAccountNumber: string;
   ifsc: string;
   bankName: string;
   branchName: string;
+  micr?: string;
+  accountHolderName?: string;
   address: string;
   documents: VendorDocument[];
   active: boolean;
@@ -60,6 +73,8 @@ export interface Vendor {
 
 export interface BudgetGrant {
   id: string;
+  code: string; // e.g. BH01
+  name: string;
   financialYear: string; // e.g. '2025-26'
   departmentId: string;
   totalGranted: number;

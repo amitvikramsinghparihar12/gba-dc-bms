@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../lib/api';
-import { BudgetGrant, Department, DDO, DdoAllocation, BudgetChangeRequest } from '../../types';
+import { BudgetGrant, DdoAllocation, BudgetChangeRequest } from '../../types';
 import { formatINR, round2 } from '../../utils/calc';
 import { Modal } from '../../components/common/Modal';
+import { BusyOverlay, PageLoader } from '../../components/common/PageLoader';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { Layers, Edit2, CheckCircle, XCircle, ArrowUpRight, ArrowDownRight, Building } from 'lucide-react';
 
@@ -14,10 +15,10 @@ interface FinanceOfficerAllocationsProps {
 export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps> = ({
   initialTab = 'allocations',
 }) => {
-  const { currentUser, departments, ddos, addToast } = useApp();
+  const { currentUser, ddos, addToast } = useApp();
   const [activeTab, setActiveTab] = useState<'allocations' | 'requests'>(initialTab);
 
-  const [selectedDeptId, setSelectedDeptId] = useState(departments[0]?.id || 'DEP-TRN');
+  const [selectedHeadId, setSelectedHeadId] = useState('BH01');
   const [grants, setGrants] = useState<BudgetGrant[]>([]);
   const [allocations, setAllocations] = useState<DdoAllocation[]>([]);
   const [requests, setRequests] = useState<BudgetChangeRequest[]>([]);
@@ -56,12 +57,9 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
     loadData();
   }, [currentUser]);
 
-  // Current selected department grant & DDOs
-  const currentGrant = grants.find((g) => g.departmentId === selectedDeptId);
-  const deptDdos = ddos.filter((d) => d.departmentId === selectedDeptId);
-  const deptAllocations = allocations.filter((a) =>
-    deptDdos.some((d) => d.id === a.ddoId)
-  );
+  const currentGrant = grants.find((g) => g.id === selectedHeadId) || grants[0];
+  const deptAllocations = allocations.filter((a) => currentGrant && a.grantId === currentGrant.id);
+  const otherDdos = ddos.filter((d) => !allocations.some((a) => a.ddoId === d.id));
 
   const totalAllocatedInDept = deptAllocations.reduce((sum, a) => sum + a.allocated, 0);
   const unallocatedInGrant = currentGrant
@@ -76,6 +74,23 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
   };
 
   // Submit Allocation Change
+  const handleAssign = async (ddoId: string) => {
+    if (!currentGrant) return;
+    setLoading(true);
+    try {
+      await api.assignDdoToBudgetHead(currentUser, ddoId, currentGrant.id);
+      addToast({
+        type: 'success',
+        title: 'DDO assigned',
+        message: `DDO ${ddoId} is now on ${currentGrant.code}. Set the budget with Increase / Decrease.`,
+      });
+      loadData();
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Could not assign DDO', message: err.message });
+      setLoading(false);
+    }
+  };
+
   const handleSaveAllocation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAllocation) return;
@@ -122,16 +137,19 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
     }
   };
 
+  if (loading) return <PageLoader label="Loading budget allocations…" />;
+
   return (
     <div className="space-y-6">
+      {isSubmitting && <BusyOverlay label="Updating allocation…" />}
       {/* Top Controls */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-slate-900">
-            Finance Officer (Level-2): DDO Budget Cap Allocation
+            Finance Officer (Level 2): Budget Head Management
           </h2>
           <p className="text-xs text-slate-500">
-            Apportion macro department grants into individual DDO operating limits and review adjustment requests.
+            Choose a budget head, allocate it across DDOs, and increase or decrease each DDO budget.
           </p>
         </div>
 
@@ -166,16 +184,16 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
           <div className="bg-slate-900 text-white p-5 rounded-xl border border-slate-800 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-2">
               <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Choose Department to Manage
+                Choose Budget Head
               </label>
               <select
-                value={selectedDeptId}
-                onChange={(e) => setSelectedDeptId(e.target.value)}
+                value={currentGrant?.id || ''}
+                onChange={(e) => setSelectedHeadId(e.target.value)}
                 className="bg-slate-800 border border-slate-700 text-white font-bold text-sm rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               >
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.id})
+                {grants.map((grant) => (
+                  <option key={grant.id} value={grant.id}>
+                    {grant.code} — {grant.name}
                   </option>
                 ))}
               </select>
@@ -203,7 +221,7 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
                 </div>
               </div>
             ) : (
-              <div className="text-xs text-amber-300">No macro grant configured for this department yet.</div>
+              <div className="text-xs text-amber-300">No budget head has been created yet.</div>
             )}
           </div>
 
@@ -223,17 +241,17 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {deptDdos.map((ddo) => {
-                    const alloc = allocations.find((a) => a.ddoId === ddo.id);
+                  {deptAllocations.map((alloc) => {
+                    const ddo = ddos.find((item) => item.id === alloc.ddoId);
                     const allocated = alloc?.allocated || 0;
                     const utilized = alloc?.utilized || 0;
                     const remaining = alloc?.remaining || 0;
                     const pct = allocated > 0 ? Math.round((utilized / allocated) * 100) : 0;
 
                     return (
-                      <tr key={ddo.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{ddo.id}</td>
-                        <td className="py-3.5 px-4 font-medium text-slate-900">{ddo.name}</td>
+                      <tr key={alloc.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{alloc.ddoId}</td>
+                        <td className="py-3.5 px-4 font-medium text-slate-900">{ddo?.name || 'DDO'}</td>
                         <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
                           {formatINR(allocated)}
                         </td>
@@ -259,14 +277,12 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          {alloc && (
-                            <button
-                              onClick={() => handleOpenEditAlloc(alloc)}
-                              className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded text-[11px] font-bold"
-                            >
-                              Edit Cap
-                            </button>
-                          )}
+                          <button
+                            onClick={() => handleOpenEditAlloc(alloc)}
+                            className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded text-[11px] font-bold"
+                          >
+                            Increase / Decrease
+                          </button>
                         </td>
                       </tr>
                     );
@@ -275,6 +291,25 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
               </table>
             </div>
           </div>
+
+          {otherDdos.length > 0 && currentGrant && (
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
+              <h3 className="text-sm font-bold text-slate-900">Assign another DDO to {currentGrant.code}</h3>
+              <p className="text-xs text-slate-500 mt-1">One budget head can fund several DDOs. A department can contain several DDOs, and each DDO belongs to one department.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {otherDdos.map((ddo) => (
+                  <button
+                    key={ddo.id}
+                    type="button"
+                    onClick={() => void handleAssign(ddo.id)}
+                    className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                  >
+                    {ddo.id} · {ddo.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* CHANGE REQUESTS TAB */
@@ -368,7 +403,7 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
           isOpen={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
           title={`Edit Budget Cap: DDO ${editingAllocation.ddoId}`}
-          subtitle="Enforces transactional floor (allocated >= utilized) and department ceiling"
+          subtitle="Increase or decrease this DDO budget. It cannot fall below the amount already used, or push the budget head over its grant."
           maxWidth="md"
         >
           <form onSubmit={handleSaveAllocation} className="space-y-4 text-xs">
@@ -400,7 +435,7 @@ export const FinanceOfficerAllocations: React.FC<FinanceOfficerAllocationsProps>
               <span className="font-bold">Invariant Protection:</span>
               <p>
                 Cannot reduce below ₹{formatINR(editingAllocation.utilized)} (currently utilized).
-                Total DDO allocations cannot exceed the department grant total.
+                DDOs on this budget head cannot together exceed the head grant. Raising the amount increases the DDO budget. Lowering it decreases the DDO budget.
               </p>
             </div>
 

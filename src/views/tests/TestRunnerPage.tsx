@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { runAllTests, TestResult } from '../../server/tests';
 import { useApp } from '../../context/AppContext';
+import { BusyOverlay } from '../../components/common/PageLoader';
 import {
   CheckCircle2,
   XCircle,
@@ -41,6 +42,7 @@ export const TestRunnerPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {isRunning && <BusyOverlay label="Running checks…" />}
       {/* Header */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

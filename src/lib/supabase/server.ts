@@ -1,8 +1,9 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { supabaseProjectUrl } from './url';
 
 export async function createServerSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = supabaseProjectUrl();
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
     throw new Error(

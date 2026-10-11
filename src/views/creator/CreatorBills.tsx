@@ -5,7 +5,10 @@ import { Bill, Vendor, DdoAllocation, BillDeduction, BillAttachment } from '../.
 import { calculateBillFinancials, formatINR, round2 } from '../../utils/calc';
 import { STANDARD_DEDUCTIONS } from '../../config/config';
 import { StatusBadge } from '../../components/common/StatusBadge';
+import { BillWorkflowModal } from '../../components/bills/BillWorkflowModal';
+import { billQueuePlace, matchesBillTab, BillListTab } from '../../utils/billQueue';
 import { Modal } from '../../components/common/Modal';
+import { BusyOverlay, PageLoader } from '../../components/common/PageLoader';
 import {
   FileText,
   Plus,
@@ -39,7 +42,9 @@ export const CreatorBills: React.FC<CreatorBillsProps> = ({ initialOpenCreate = 
   const [loading, setLoading] = useState(true);
 
   // Filters
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState<BillListTab>('All Bills');
+  const [workflowBill, setWorkflowBill] = useState<Bill | null>(null);
+  const [showWorkflow, setShowWorkflow] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDdo, setSelectedDdo] = useState(currentUser.ddoIds[0] || '');
 
@@ -267,7 +272,7 @@ export const CreatorBills: React.FC<CreatorBillsProps> = ({ initialOpenCreate = 
 
   // Filtered bills
   const filteredBills = bills.filter((b) => {
-    if (statusFilter !== 'ALL' && b.status !== statusFilter) return false;
+    if (!matchesBillTab(b.status, statusFilter)) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const match =
@@ -280,8 +285,20 @@ export const CreatorBills: React.FC<CreatorBillsProps> = ({ initialOpenCreate = 
     return true;
   });
 
+  if (loading) return <PageLoader label="Loading bills…" />;
+
   return (
     <div className="space-y-6">
+      {isSubmitting && <BusyOverlay label="Saving bill…" />}
+      {showWorkflow && (
+        <BillWorkflowModal
+          bill={workflowBill}
+          onClose={() => {
+            setShowWorkflow(false);
+            setWorkflowBill(null);
+          }}
+        />
+      )}
       {/* Top Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
         <div>
@@ -306,6 +323,16 @@ export const CreatorBills: React.FC<CreatorBillsProps> = ({ initialOpenCreate = 
             </select>
           )}
 
+          <button
+            type="button"
+            onClick={() => {
+              setWorkflowBill(null);
+              setShowWorkflow(true);
+            }}
+            className="px-4 py-2 border border-blue-700 text-blue-700 rounded-lg text-xs font-bold"
+          >
+            DC Bill Workflow
+          </button>
           <button
             onClick={handleOpenNew}
             className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-2 transition-transform active:scale-95"
@@ -367,7 +394,7 @@ export const CreatorBills: React.FC<CreatorBillsProps> = ({ initialOpenCreate = 
 
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
           <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-          {['ALL', 'Draft', 'Pending Verification', 'Pending Approval', 'Pending RTGS', 'Paid', 'Rejected'].map(
+          {(['All Bills', 'Pending', 'Sent for Review', 'Approved', 'Rejected'] as BillListTab[]).map(
             (status) => (
               <button
                 key={status}
@@ -391,20 +418,21 @@ export const CreatorBills: React.FC<CreatorBillsProps> = ({ initialOpenCreate = 
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                <th className="py-3.5 px-4">Bill ID</th>
-                <th className="py-3.5 px-4">Vendor & Details</th>
-                <th className="py-3.5 px-4">Work Order / Agreement</th>
-                <th className="py-3.5 px-4 text-right">Base Value</th>
-                <th className="py-3.5 px-4 text-right">Gross Value</th>
-                <th className="py-3.5 px-4 text-right">Deductions</th>
-                <th className="py-3.5 px-4 text-right">Net Payable</th>
+                <th className="py-3.5 px-4">DC No.</th>
+                <th className="py-3.5 px-4">DDO</th>
+                <th className="py-3.5 px-4">Creator</th>
+                <th className="py-3.5 px-4">Pending from</th>
+                <th className="py-3.5 px-4">Pending Role</th>
                 <th className="py-3.5 px-4 text-center">Status</th>
+                <th className="py-3.5 px-4">Narration</th>
+                <th className="py-3.5 px-4 text-right">Net Payable</th>
                 <th className="py-3.5 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {filteredBills.map((bill) => {
                 const vendor = vendors.find((v) => v.id === bill.vendorId);
+                const place = billQueuePlace(bill);
                 const isRejected = bill.status === 'Rejected';
                 const isDraft = bill.status === 'Draft';
 
@@ -413,31 +441,13 @@ export const CreatorBills: React.FC<CreatorBillsProps> = ({ initialOpenCreate = 
                     <td className="py-3 px-4 font-mono font-bold text-blue-700">
                       {bill.id}
                       <span className="block text-[10px] text-slate-400 font-normal font-sans">
-                        {new Date(bill.createdAt).toLocaleDateString()}
+                        {vendor?.name || bill.vendorId}
                       </span>
                     </td>
-                    <td className="py-3 px-4">
-                      <div className="font-semibold text-slate-900">{vendor?.name || bill.vendorId}</div>
-                      <div className="text-[11px] text-slate-500 font-mono">
-                        GST: {vendor?.gstin || 'N/A'}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 max-w-xs">
-                      <div className="font-medium text-slate-900">{bill.workOrderNo}</div>
-                      <div className="text-[11px] text-slate-500 truncate" title={bill.description}>
-                        {bill.description}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono">{formatINR(bill.baseValue)}</td>
-                    <td className="py-3 px-4 text-right font-mono font-semibold text-blue-800">
-                      {formatINR(bill.grossValue)}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono text-rose-600">
-                      -{formatINR(bill.totalDeductions)}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                      {formatINR(bill.netPayable)}
-                    </td>
+                    <td className="py-3 px-4 font-mono text-slate-700">{bill.ddoId}</td>
+                    <td className="py-3 px-4">{bill.createdByName || 'Creator'}</td>
+                    <td className="py-3 px-4">{place.pendingFrom}</td>
+                    <td className="py-3 px-4">{place.pendingRole}</td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={bill.status} size="sm" />
                       {isRejected && (
@@ -446,7 +456,23 @@ export const CreatorBills: React.FC<CreatorBillsProps> = ({ initialOpenCreate = 
                         </div>
                       )}
                     </td>
+                    <td className="py-3 px-4 max-w-xs truncate" title={bill.description}>
+                      {bill.description}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                      {formatINR(bill.netPayable)}
+                    </td>
                     <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWorkflowBill(bill);
+                          setShowWorkflow(true);
+                        }}
+                        className="px-2 py-1 rounded text-blue-700 hover:bg-blue-50 text-[11px] font-semibold"
+                      >
+                        Workflow
+                      </button>
                       <button
                         onClick={() => setViewingBill(bill)}
                         className="px-2 py-1 rounded text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-[11px] font-semibold"

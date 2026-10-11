@@ -88,10 +88,11 @@ create table if not exists vendor_documents (
 create table if not exists budget_grants (
   id varchar(64) primary key,
   financial_year varchar(16) not null,
-  department_id varchar(32) not null references departments(id) on delete restrict,
+  code varchar(16),
+  name varchar(255),
+  department_id varchar(32) references departments(id) on delete restrict,
   total_granted numeric(16, 2) not null check (total_granted > 0),
-  created_at timestamptz not null default now(),
-  constraint uq_dept_fy unique (financial_year, department_id)
+  created_at timestamptz not null default now()
 );
 
 create table if not exists ddo_allocations (
@@ -141,7 +142,7 @@ create table if not exists bills (
   total_deductions numeric(16, 2) not null default 0 check (total_deductions >= 0),
   net_payable numeric(16, 2) not null check (net_payable >= 0),
   status bill_status not null default 'Draft',
-  rtgs_batch_id varchar(64) unique references rtgs_batches(id) on delete set null,
+  rtgs_batch_id varchar(64) references rtgs_batches(id) on delete set null,
   created_by varchar(64) not null references profiles(id),
   created_by_name varchar(255),
   created_at timestamptz not null default now(),
@@ -210,7 +211,9 @@ create table if not exists workflow_config (
   id int primary key default 1 check (id = 1),
   verifier_enabled boolean not null default true,
   mandatory_remarks_min_length int not null default 10,
-  financial_year varchar(16) not null default '2025-26'
+  financial_year varchar(16) not null default '2025-26',
+  verifier_role user_role not null default 'Finance Officer',
+  approver_role user_role not null default 'Director of Finance'
 );
 
 create table if not exists app_counters (
@@ -440,7 +443,7 @@ begin
 
   if round(v_others + p_new_allocated, 2) > round(v_grant.total_granted, 2) then
     v_available := round(v_grant.total_granted - v_others, 2);
-    raise exception 'Total department allocations would exceed grant cap. Maximum available for this DDO is ₹%.', v_available;
+    raise exception 'Total budget-head allocations would exceed the head grant. Maximum available for this DDO is ₹%.', v_available;
   end if;
 
   v_old := v_alloc.allocated;
@@ -594,3 +597,34 @@ grant execute on function next_counter(text) to service_role;
 grant execute on function reject_bill(text, text, text, text) to service_role;
 grant execute on function update_ddo_allocation(text, text, numeric) to service_role;
 grant execute on function generate_rtgs_batch(text, text[], text) to service_role;
+
+-- Workflow alignment for databases created before budget heads.
+alter table budget_grants add column if not exists code varchar(16);
+alter table budget_grants add column if not exists name varchar(255);
+alter table budget_grants alter column department_id drop not null;
+alter table budget_grants drop constraint if exists uq_dept_fy;
+create unique index if not exists uq_budget_head_fy on budget_grants (financial_year, code) where code is not null;
+
+alter table workflow_config add column if not exists verifier_role user_role not null default 'Finance Officer';
+alter table workflow_config add column if not exists approver_role user_role not null default 'Director of Finance';
+
+drop index if exists uq_ddos_one_per_department;
+
+alter table bills drop constraint if exists bills_rtgs_batch_id_key;
+
+-- Fields shown on the ProfitEazy masters in the DC Bill application walkthrough.
+alter table profiles add column if not exists username varchar(64);
+alter table profiles add column if not exists first_name varchar(128);
+alter table profiles add column if not exists last_name varchar(128);
+alter table profiles add column if not exists mobile varchar(10);
+
+alter table vendors add column if not exists pan varchar(10);
+alter table vendors add column if not exists city varchar(128);
+alter table vendors add column if not exists pin_code varchar(6);
+alter table vendors add column if not exists phone varchar(15);
+alter table vendors add column if not exists email varchar(255);
+alter table vendors add column if not exists micr varchar(9);
+alter table vendors add column if not exists account_holder_name varchar(255);
+alter table vendors add column if not exists old_id varchar(64);
+
+alter table vendor_documents add column if not exists file_name varchar(255);

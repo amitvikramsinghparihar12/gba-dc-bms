@@ -209,7 +209,7 @@ npm run seed
 npm run dev
 ```
 
-The app runs at http://localhost:3000. Every seeded account signs in with password `Demo@12345`.
+The app runs at http://localhost:3000. Sign in with an email and password. Seeded accounts are listed in `credentials.txt`, which is not committed.
 
 ```bash
 npm test

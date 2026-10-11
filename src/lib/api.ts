@@ -28,6 +28,7 @@ import {
   saveDraftBillAction,
   submitBillAction,
   toggleVendorDocStatusAction,
+  assignDdoToBudgetHeadAction,
   updateDdoAllocationAction,
   updateUserMappingsAction,
   updateWorkflowConfigAction,
@@ -61,6 +62,8 @@ export const api = {
   getDdoAllocations: (_user: User) => unwrap(getDdoAllocationsAction()),
   updateDdoAllocation: (_user: User, allocationId: string, newAllocated: number) =>
     unwrap(updateDdoAllocationAction(allocationId, newAllocated)),
+  assignDdoToBudgetHead: (_user: User, ddoId: string, grantId: string) =>
+    unwrap(assignDdoToBudgetHeadAction(ddoId, grantId)),
   requestBudgetChange: (
     _user: User,
     req: { ddoId: string; type: 'increase' | 'decrease'; amount: number; reason: string }
@@ -82,7 +85,7 @@ export const api = {
   toggleVendorDocStatus: (_user: User, vendorId: string, docName: string) =>
     unwrap(toggleVendorDocStatusAction(vendorId, docName)),
   getUsers: () => unwrap(getUsersAction()),
-  createUser: (_user: User, user: Omit<User, 'id'>) => unwrap(createUserAction(user)),
+  createUser: (_user: User, user: Omit<User, 'id'> & { password?: string }) => unwrap(createUserAction(user)),
   updateUserMappings: (
     _user: User,
     userId: string,

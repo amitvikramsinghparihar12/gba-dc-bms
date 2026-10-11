@@ -4,7 +4,10 @@ import { api } from '../../lib/api';
 import { Bill, Vendor, DdoAllocation } from '../../types';
 import { formatINR } from '../../utils/calc';
 import { StatusBadge } from '../../components/common/StatusBadge';
+import { BillWorkflowModal } from '../../components/bills/BillWorkflowModal';
+import { billQueuePlace } from '../../utils/billQueue';
 import { Modal } from '../../components/common/Modal';
+import { BusyOverlay, PageLoader } from '../../components/common/PageLoader';
 import {
   CheckCircle,
   XCircle,
@@ -33,6 +36,7 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({ roleStage }) => {
 
   // Review Modal State
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
+  const [workflowBill, setWorkflowBill] = useState<Bill | null>(null);
   const [remarks, setRemarks] = useState('');
   const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -128,6 +132,8 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({ roleStage }) => {
     }
   };
 
+  if (loading) return <PageLoader label="Loading review queue…" />;
+
   const activeVendor = selectedBill ? vendors.find((v) => v.id === selectedBill.vendorId) : null;
   const activeAllocation = selectedBill
     ? allocations.find((a) => a.ddoId === selectedBill.ddoId)
@@ -135,12 +141,14 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({ roleStage }) => {
 
   return (
     <div className="space-y-6">
+      {workflowBill && <BillWorkflowModal bill={workflowBill} onClose={() => setWorkflowBill(null)} />}
+      {isProcessing && <BusyOverlay label="Updating bill…" />}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold text-slate-900">
-              {roleStage === 'Verifier' ? 'Scrutiny & Verification Queue' : 'Sanction & Approval Queue'}
+              {roleStage === 'Verifier' ? 'Finance Officer Verification Queue' : 'Director of Finance Sanction Queue'}
             </h2>
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
               {bills.length} Pending
@@ -165,10 +173,12 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({ roleStage }) => {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                <th className="py-3.5 px-4">Bill ID</th>
+                <th className="py-3.5 px-4">DC No.</th>
                 <th className="py-3.5 px-4">DDO</th>
+                <th className="py-3.5 px-4">Creator</th>
+                <th className="py-3.5 px-4">Pending Role</th>
+                <th className="py-3.5 px-4">Narration</th>
                 <th className="py-3.5 px-4">Vendor</th>
-                <th className="py-3.5 px-4">Work Order</th>
                 <th className="py-3.5 px-4 text-right">Gross Value</th>
                 <th className="py-3.5 px-4 text-right">Deductions</th>
                 <th className="py-3.5 px-4 text-right">Net Payable</th>
@@ -179,10 +189,14 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({ roleStage }) => {
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {bills.map((bill) => {
                 const vendor = vendors.find((v) => v.id === bill.vendorId);
+                const place = billQueuePlace(bill);
                 return (
                   <tr key={bill.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3 px-4 font-mono font-bold text-blue-700">{bill.id}</td>
                     <td className="py-3 px-4 font-mono text-slate-600">{bill.ddoId}</td>
+                    <td className="py-3 px-4">{bill.createdByName || 'Creator'}</td>
+                    <td className="py-3 px-4">{place.pendingRole}</td>
+                    <td className="py-3 px-4 max-w-[160px] truncate" title={bill.description}>{bill.description}</td>
                     <td className="py-3 px-4">
                       <div className="font-semibold text-slate-900">{vendor?.name || bill.vendorId}</div>
                       <div className="text-[10px] text-slate-400 font-mono">GST: {vendor?.gstin}</div>
@@ -200,7 +214,14 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({ roleStage }) => {
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={bill.status} size="sm" />
                     </td>
-                    <td className="py-3 px-4 text-right">
+                    <td className="py-3 px-4 text-right space-x-1">
+                      <button
+                        type="button"
+                        onClick={() => setWorkflowBill(bill)}
+                        className="px-2 py-1.5 rounded-lg text-xs font-bold text-blue-700 border border-blue-200"
+                      >
+                        Workflow
+                      </button>
                       <button
                         onClick={() => handleOpenReview(bill)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white shadow-xs transition-colors ${
@@ -218,7 +239,7 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({ roleStage }) => {
 
               {bills.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                  <td colSpan={12} className="py-12 text-center text-slate-400">
                     <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-70" />
                     <p className="font-semibold text-slate-700">Queue is completely clear!</p>
                     <p className="text-xs text-slate-400 mt-0.5">
@@ -467,7 +488,7 @@ export const ReviewQueue: React.FC<ReviewQueueProps> = ({ roleStage }) => {
               >
                 <CheckCircle className="w-4 h-4" />
                 <span>
-                  {roleStage === 'Verifier' ? 'Verify & Pass to Approver' : 'Sanction & Release for RTGS'}
+                  {roleStage === 'Verifier' ? 'Verify & pass to Director of Finance' : 'Sanction & Release for RTGS'}
                 </span>
               </button>
             </div>

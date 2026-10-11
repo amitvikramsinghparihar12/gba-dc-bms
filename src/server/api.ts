@@ -16,7 +16,7 @@ import {
 } from '../types';
 import { db } from './db';
 import { calculateBillFinancials, round2 } from '../utils/calc';
-import { isValidGSTIN, isValidIFSC, isValidDdoId, canTransitionStatus } from '../utils/validators';
+import { isValidGSTIN, isValidIFSC, isValidDdoId, canTransitionStatus, assertVendorMaster, assertUserIdentity } from '../utils/validators';
 import { assertPermission } from '../config/permissions';
 import { STANDARD_DEDUCTIONS } from '../config/config';
 
@@ -43,6 +43,11 @@ export const api = {
         bills = bills.filter((b) => !b.createdBy || currentUser.creatorIds!.includes(b.createdBy));
       }
     } else if (currentUser.role === 'Approver') {
+      bills = bills.filter((b) => currentUser.ddoIds.includes(b.ddoId));
+    } else if (
+      (currentUser.role === 'Finance Officer' || currentUser.role === 'Director of Finance') &&
+      currentUser.ddoIds.length > 0
+    ) {
       bills = bills.filter((b) => currentUser.ddoIds.includes(b.ddoId));
     } else if (currentUser.role === 'RTGS Manager') {
       // RTGS Manager handles bills pending RTGS or paid
@@ -365,9 +370,9 @@ export const api = {
    * Key Decision #2: Releases reserved grossValue back to DDO allocation.
    */
   async rejectBill(currentUser: User, billId: string, remarks: string): Promise<Bill> {
-    if (currentUser.role === 'Verifier') {
+    if (currentUser.role === 'Verifier' || currentUser.role === 'Finance Officer') {
       assertPermission(currentUser.role, 'reject:verifier_bill');
-    } else if (currentUser.role === 'Approver') {
+    } else if (currentUser.role === 'Approver' || currentUser.role === 'Director of Finance') {
       assertPermission(currentUser.role, 'revert:approver_bill');
     } else {
       throw new Error(`Role '${currentUser.role}' cannot reject bills.`);
@@ -621,13 +626,15 @@ export const api = {
     assertPermission(currentUser.role, 'manage:budget_grants');
 
     return db.runTransaction('CREATE_OR_UPDATE_GRANT', (draft) => {
-      if (!grantInput.departmentId || !grantInput.totalGranted || grantInput.totalGranted <= 0) {
-        throw new Error('Valid department and positive grant amount are required.');
+      const code = (grantInput.code || '').trim().toUpperCase();
+      const name = (grantInput.name || '').trim();
+      if (!code || !name || !grantInput.totalGranted || grantInput.totalGranted <= 0) {
+        throw new Error('Budget head code, name, and a positive grant amount are required.');
       }
 
       const existingIndex = grantInput.id ? draft.budgetGrants.findIndex((g) => g.id === grantInput.id) : -1;
       const isNew = existingIndex === -1;
-      const grantId = isNew ? `GRT-${draft.workflowConfig.financialYear.split('-')[0]}-${grantInput.departmentId.replace('DEP-', '')}` : grantInput.id!;
+      const grantId = isNew ? code : grantInput.id!;
 
       // Consistency check: new grant amount cannot be less than currently allocated to DDOs
       const currentAllocated = draft.ddoAllocations
@@ -636,14 +643,16 @@ export const api = {
 
       if (grantInput.totalGranted < currentAllocated) {
         throw new Error(
-          `Cannot reduce grant to ₹${grantInput.totalGranted} because ₹${currentAllocated} is already allocated to DDOs.`
+          `Cannot decrease this budget head to ₹${grantInput.totalGranted} because ₹${currentAllocated} is already allocated to DDOs.`
         );
       }
 
       const grant: BudgetGrant = {
         id: grantId,
+        code,
+        name,
         financialYear: grantInput.financialYear || draft.workflowConfig.financialYear,
-        departmentId: grantInput.departmentId,
+        departmentId: '',
         totalGranted: round2(grantInput.totalGranted),
       };
 
@@ -874,6 +883,9 @@ export const api = {
       if (draft.ddos.some((d) => d.id === ddoData.id)) {
         throw new Error(`DDO ID '${ddoData.id}' already exists.`);
       }
+      if (!ddoData.departmentId) {
+        throw new Error('A DDO must belong to one department.');
+      }
 
       const ddo: DDO = {
         id: ddoData.id.trim(),
@@ -881,19 +893,6 @@ export const api = {
         departmentId: ddoData.departmentId,
       };
       draft.ddos.push(ddo);
-
-      // Create initial allocation shell under active grant
-      const grant = draft.budgetGrants.find((g) => g.departmentId === ddo.departmentId);
-      if (grant) {
-        draft.ddoAllocations.push({
-          id: `ALC-${ddo.departmentId.replace('DEP-', '')}-${ddo.id}`,
-          grantId: grant.id,
-          ddoId: ddo.id,
-          allocated: 0,
-          utilized: 0,
-          remaining: 0,
-        });
-      }
 
       db.appendAuditLog(draft, {
         actionType: 'DDO_CREATED',
@@ -924,11 +923,15 @@ export const api = {
     if (!isValidIFSC(vendorData.ifsc)) {
       throw new Error('Invalid IFSC format. Expected 11 alphanumeric characters e.g. CNRB0000412.');
     }
+    assertVendorMaster(vendorData);
 
     return db.runTransaction('CREATE_VENDOR', (draft) => {
       const nextNum = draft.vendors.length + 1;
       const vendor: Vendor = {
         ...vendorData,
+        pan: vendorData.pan?.trim().toUpperCase(),
+        gstin: vendorData.gstin.trim().toUpperCase(),
+        ifsc: vendorData.ifsc.trim().toUpperCase(),
         id: `V-${String(nextNum).padStart(4, '0')}`,
         active: true,
         documents: [
@@ -991,12 +994,29 @@ export const api = {
     return db.getState().users;
   },
 
-  async createUser(currentUser: User, userData: Omit<User, 'id'>): Promise<User> {
+  async createUser(currentUser: User, userData: Omit<User, 'id'> & { password?: string }): Promise<User> {
     assertPermission(currentUser.role, 'manage:users');
+    assertUserIdentity(userData);
 
     return db.runTransaction('CREATE_USER', (draft) => {
+      const username = userData.username?.trim();
+      if (draft.users.some((user) => user.username?.toLowerCase() === username?.toLowerCase())) {
+        throw new Error(`User name ${username} is already in use.`);
+      }
+      if (userData.role === 'Creator' && userData.ddoIds.length > 1) {
+        throw new Error('A Creator can belong to only one DDO.');
+      }
+      if (userData.role === 'Creator' && userData.ddoIds.length === 1) {
+        const taken = draft.users.find(
+          (user) => user.role === 'Creator' && user.active && user.ddoIds.includes(userData.ddoIds[0])
+        );
+        if (taken) throw new Error(`DDO ${userData.ddoIds[0]} already has creator ${taken.name}.`);
+      }
+      const { password: _password, ...stored } = userData;
       const user: User = {
-        ...userData,
+        ...stored,
+        name: `${userData.firstName?.trim()} ${userData.lastName?.trim()}`.trim(),
+        username,
         id: `USR-${Date.now().toString(36).toUpperCase()}`,
       };
       draft.users.push(user);
@@ -1029,6 +1049,17 @@ export const api = {
 
       const oldState = { ddoIds: [...user.ddoIds], creatorIds: [...(user.creatorIds || [])], role: user.role };
 
+      const nextRole = updates.role || user.role;
+      const nextDdoIds = updates.ddoIds || user.ddoIds;
+      if (nextRole === 'Creator' && nextDdoIds.length > 1) {
+        throw new Error('A Creator can belong to only one DDO.');
+      }
+      if (nextRole === 'Creator' && nextDdoIds.length === 1) {
+        const taken = draft.users.find(
+          (other) => other.id !== user.id && other.role === 'Creator' && other.active && other.ddoIds.includes(nextDdoIds[0])
+        );
+        if (taken) throw new Error(`DDO ${nextDdoIds[0]} already has creator ${taken.name}.`);
+      }
       if (updates.ddoIds) user.ddoIds = updates.ddoIds;
       if (updates.creatorIds) user.creatorIds = updates.creatorIds;
       if (updates.active !== undefined) user.active = updates.active;

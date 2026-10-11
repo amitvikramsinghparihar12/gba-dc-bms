@@ -21,14 +21,11 @@ export function getInitialSeedData() {
   ];
 
   const ddos: DDO[] = [
-    // Transport
     { id: '100234', name: 'Executive Engineer - Road Infrastructure Div', departmentId: 'DEP-TRN' },
     { id: '100235', name: 'Executive Engineer - Electric Bus Depot & Fleet', departmentId: 'DEP-TRN' },
-    // Engineering
     { id: '100567', name: 'Superintending Engineer - Major Roads North', departmentId: 'DEP-ENG' },
     { id: '100568', name: 'Executive Engineer - Stormwater Drain South', departmentId: 'DEP-ENG' },
     { id: '100569', name: 'Executive Engineer - Lakes & Rejuvenation', departmentId: 'DEP-ENG' },
-    // Accounts
     { id: '200111', name: 'Senior Accounts Officer - Central Treasury', departmentId: 'DEP-ACC' },
     { id: '200112', name: 'Chief Auditor - Municipal Audit Cell', departmentId: 'DEP-ACC' },
   ];
@@ -47,7 +44,7 @@ export function getInitialSeedData() {
       name: 'Suresh Kumar, IAS',
       email: 'suresh.df@gba.karnataka.gov.in',
       role: 'Director of Finance',
-      ddoIds: [],
+      ddoIds: ['100234', '100235', '100567', '100568', '100569', '200111', '200112'],
       active: true,
     },
     {
@@ -55,7 +52,7 @@ export function getInitialSeedData() {
       name: 'Meera Nambiar, KAS',
       email: 'meera.fo@gba.karnataka.gov.in',
       role: 'Finance Officer',
-      ddoIds: [],
+      ddoIds: ['100234', '100235', '100567', '100568', '100569', '200111', '200112'],
       active: true,
     },
     {
@@ -280,21 +277,27 @@ export function getInitialSeedData() {
   // Budget Head Grants (macro)
   const budgetGrants: BudgetGrant[] = [
     {
-      id: 'GRT-2025-TRN',
+      id: 'BH01',
+      code: 'BH01',
+      name: 'Road & Transport Works',
       financialYear: '2025-26',
-      departmentId: 'DEP-TRN',
+      departmentId: '',
       totalGranted: 100000000, // ₹ 10 Crores
     },
     {
-      id: 'GRT-2025-ENG',
+      id: 'BH02',
+      code: 'BH02',
+      name: 'Engineering Works',
       financialYear: '2025-26',
-      departmentId: 'DEP-ENG',
+      departmentId: '',
       totalGranted: 250000000, // ₹ 25 Crores
     },
     {
-      id: 'GRT-2025-ACC',
+      id: 'BH03',
+      code: 'BH03',
+      name: 'Municipal Accounts',
       financialYear: '2025-26',
-      departmentId: 'DEP-ACC',
+      departmentId: '',
       totalGranted: 50000000, // ₹ 5 Crores
     },
   ];
@@ -304,7 +307,7 @@ export function getInitialSeedData() {
   const ddoAllocations: DdoAllocation[] = [
     {
       id: 'ALC-TRN-100234',
-      grantId: 'GRT-2025-TRN',
+      grantId: 'BH01',
       ddoId: '100234', // Road Infra Div
       allocated: 60000000, // ₹ 6 Cr
       utilized: 15450000, // ₹ 1.545 Cr
@@ -312,7 +315,7 @@ export function getInitialSeedData() {
     },
     {
       id: 'ALC-TRN-100235',
-      grantId: 'GRT-2025-TRN',
+      grantId: 'BH01',
       ddoId: '100235', // Bus Depot Fleet Div (Budget Near Limit!)
       allocated: 20000000, // ₹ 2.00 Cr
       utilized: 19450000, // ₹ 1.945 Cr
@@ -320,7 +323,7 @@ export function getInitialSeedData() {
     },
     {
       id: 'ALC-ENG-100567',
-      grantId: 'GRT-2025-ENG',
+      grantId: 'BH02',
       ddoId: '100567', // Major Roads North
       allocated: 120000000, // ₹ 12 Cr
       utilized: 41200000, // ₹ 4.12 Cr
@@ -328,7 +331,7 @@ export function getInitialSeedData() {
     },
     {
       id: 'ALC-ENG-100568',
-      grantId: 'GRT-2025-ENG',
+      grantId: 'BH02',
       ddoId: '100568', // Stormwater Drain South
       allocated: 80000000, // ₹ 8 Cr
       utilized: 22000000, // ₹ 2.20 Cr
@@ -336,7 +339,7 @@ export function getInitialSeedData() {
     },
     {
       id: 'ALC-ACC-200111',
-      grantId: 'GRT-2025-ACC',
+      grantId: 'BH03',
       ddoId: '200111', // Central Treasury
       allocated: 35000000, // ₹ 3.5 Cr
       utilized: 8900000, // ₹ 89 Lakhs
@@ -950,11 +953,41 @@ export function getInitialSeedData() {
     financialYear: '2025-26',
   };
 
+  const usersWithIdentity: User[] = users.map((user, index) => {
+    const clean = user.name.replace(/,.*$/, '').trim();
+    const parts = clean.split(/\s+/).filter(Boolean);
+    const firstName = (parts[0] || 'User').replace(/[^A-Za-z]/g, '') || 'User';
+    const lastName = (parts.slice(1).join(' ') || 'Officer').replace(/[^A-Za-z]/g, '') || 'Officer';
+    return {
+      ...user,
+      firstName,
+      lastName,
+      username: `${firstName}${lastName}`,
+      mobile: `98${String(10000000 + index)}`,
+    };
+  });
+
+  const vendorsWithMaster: Vendor[] = vendors.map((vendor, index) => {
+    const pin = vendor.address.match(/[1-9]\d{5}/)?.[0] || '560001';
+    const slug = vendor.name.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
+    return {
+      ...vendor,
+      pan: vendor.gstin.slice(2, 12),
+      city: 'Bengaluru',
+      pinCode: pin,
+      phone: `97${String(20000000 + index)}`,
+      email: `${slug}@vendor.gba.example`,
+      micr: `56001500${index + 1}`,
+      accountHolderName: vendor.name,
+      oldId: '',
+    };
+  });
+
   return {
     departments,
     ddos,
-    users,
-    vendors,
+    users: usersWithIdentity,
+    vendors: vendorsWithMaster,
     bankAccounts,
     budgetGrants,
     ddoAllocations,

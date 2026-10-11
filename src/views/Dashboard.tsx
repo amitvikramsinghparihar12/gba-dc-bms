@@ -4,7 +4,9 @@ import { api } from '../lib/api';
 import { Bill, DdoAllocation, BudgetGrant, DDO } from '../types';
 import { formatINR } from '../utils/calc';
 import { StatCard } from '../components/common/StatCard';
+import { PageLoader } from '../components/common/PageLoader';
 import { StatusBadge } from '../components/common/StatusBadge';
+import { billQueuePlace } from '../utils/billQueue';
 import {
   FileText,
   Clock,
@@ -66,6 +68,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const utilizationPct = totalAllocated > 0 ? Math.round((totalUtilized / totalAllocated) * 100) : 0;
 
   const totalPayablePendingRtgs = pendingRtgs.reduce((acc, b) => acc + b.netPayable, 0);
+
+  if (loading) return <PageLoader label="Loading dashboard…" />;
 
   return (
     <div className="space-y-6">
@@ -408,10 +412,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-100/70 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                <th className="py-3 px-4">Bill ID</th>
+                <th className="py-3 px-4">DC No.</th>
                 <th className="py-3 px-4">DDO</th>
-                <th className="py-3 px-4">Vendor ID</th>
-                <th className="py-3 px-4">Work Order / Description</th>
+                <th className="py-3 px-4">Creator</th>
+                <th className="py-3 px-4">Pending from</th>
+                <th className="py-3 px-4">Pending Role</th>
+                <th className="py-3 px-4">Narration</th>
                 <th className="py-3 px-4 text-right">Gross Value</th>
                 <th className="py-3 px-4 text-right">Net Payable</th>
                 <th className="py-3 px-4 text-center">Status</th>
@@ -419,14 +425,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {bills.slice(0, 7).map((bill) => (
+              {bills.slice(0, 7).map((bill) => {
+                const place = billQueuePlace(bill);
+                return (
                 <tr key={bill.id} className="hover:bg-slate-50 transition-colors">
                   <td className="py-3 px-4 font-mono font-bold text-blue-700">{bill.id}</td>
                   <td className="py-3 px-4 font-mono text-slate-600">{bill.ddoId}</td>
-                  <td className="py-3 px-4 font-mono text-slate-600">{bill.vendorId}</td>
+                  <td className="py-3 px-4">{bill.createdByName || 'Creator'}</td>
+                  <td className="py-3 px-4">{place.pendingFrom}</td>
+                  <td className="py-3 px-4">{place.pendingRole}</td>
                   <td className="py-3 px-4 max-w-xs truncate" title={bill.description}>
-                    <div className="font-medium text-slate-900 truncate">{bill.workOrderNo}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{bill.description}</div>
+                    {bill.description}
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-medium">
                     {formatINR(bill.grossValue)}
@@ -472,11 +481,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                     )}
                   </td>
                 </tr>
-              ))}
+              );
+              })}
 
               {bills.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                  <td colSpan={10} className="py-8 text-center text-slate-400">
                     No DC bills found matching your mapped scope.
                   </td>
                 </tr>

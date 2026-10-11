@@ -1,13 +1,13 @@
 import { config } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { seedAll } from '../src/lib/seed-db';
-import { DEMO_PASSWORD } from '../src/config/demo';
+import { supabaseProjectUrl } from '../src/lib/supabase/url';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
 
 async function main() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const url = supabaseProjectUrl();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
     console.error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local');
@@ -19,7 +19,7 @@ async function main() {
   });
 
   await seedAll(admin);
-  console.log(`Seed complete. Sign in with any demo email and password ${DEMO_PASSWORD}`);
+  console.log('Seed complete. Sign-in accounts are listed in credentials.txt.');
 }
 
 main().catch((error) => {
